@@ -720,7 +720,10 @@ window._fmtDateDMY=_fmtDateDMY;
           <button id="replay-play-btn" onclick="_replayTogglePlay()" style="background:none;border:1px solid #e8b830;color:#e8b830;border-radius:50%;width:32px;height:32px;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center">▶</button>
           <button onclick="_replaySpeedUp()" style="background:none;border:1px solid #555;color:#8a8a8a;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center" title="Faster">»</button>
           <span id="replay-speed-label" style="color:#e8b830;font-size:11px;font-family:'Roboto Mono',monospace;min-width:28px;text-align:center">1x</span>
-          <input id="replay-slider" type="range" min="0" max="1000" value="1000" oninput="_replaySeek(this.value)" style="flex:1;accent-color:#e8b830;cursor:pointer">
+          <div style="flex:1;display:flex;flex-direction:column;gap:2px">
+            <input id="replay-slider" type="range" min="0" max="1000" value="1000" oninput="_replaySeek(this.value)" style="width:100%;accent-color:#e8b830;cursor:pointer;margin:0">
+            <div id="replay-pit-markers" style="position:relative;height:20px;pointer-events:none"></div>
+          </div>
           <span id="replay-time" style="color:#8a8a8a;font-size:12px;font-family:'Roboto Mono',monospace;min-width:120px;text-align:right">0:00:00 / 0:00:00</span>
         </div>
       </div>
@@ -1511,12 +1514,49 @@ function _renderEnduranceTeams(){
   const tl=document.getElementById('endurance-timeline');
   tl.style.display='';
   document.getElementById('replay-slider').value=1000;
+  _renderPitMarkers();
 
   if(_replayInterval){clearInterval(_replayInterval);_replayInterval=null;}
   document.getElementById('replay-play-btn').textContent='▶';
 
   _replayT=s.end_time;
   _replayUpdateDisplay();
+}
+
+function _renderPitMarkers(){
+  const container=document.getElementById('replay-pit-markers');
+  if(!container||!_enduranceData)return;
+  const s=_enduranceSessions[_enduranceIdx];
+  const dur=s.end_time-s.start_time;
+  if(!dur){container.innerHTML='';return;}
+  // Collect pit entries: false→true transition per team
+  const pitEntries=[];
+  const teamOnPit={};
+  (_enduranceData.events||[]).forEach(e=>{
+    const t=e.data&&e.data.team;
+    if(!t||!t.number)return;
+    const onPit=t.isOnPit===true||t.isOnPit==='true';
+    if(onPit&&!teamOnPit[t.number])pitEntries.push(e.ts);
+    teamOnPit[t.number]=onPit;
+  });
+  // Group within 60s window
+  pitEntries.sort((a,b)=>a-b);
+  const WINDOW=60000;
+  const groups=[];
+  pitEntries.forEach(ts=>{
+    const last=groups[groups.length-1];
+    if(last&&ts-last.ts<WINDOW)last.count++;
+    else groups.push({ts,count:1});
+  });
+  const maxCount=Math.max(1,...groups.map(g=>g.count));
+  const minH=5,maxH=18;
+  container.innerHTML=groups.map(g=>{
+    const pct=(g.ts-s.start_time)/dur*100;
+    if(pct<0||pct>100)return'';
+    const h=minH+((g.count-1)/Math.max(1,maxCount-1))*(maxH-minH);
+    const opacity=0.4+((g.count-1)/Math.max(1,maxCount-1))*0.6;
+    return`<div style="position:absolute;left:${pct.toFixed(2)}%;bottom:0;width:2px;height:${h.toFixed(0)}px;background:#e8b830;opacity:${opacity.toFixed(2)};transform:translateX(-50%)"></div>`;
+  }).join('');
 }
 
 function _parseS2sec(s2){
