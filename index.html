@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Roboto+Mono:wght@400;500;700&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#08090d;min-height:100vh;padding:0}
@@ -942,7 +943,10 @@ function _loadEnduranceRace(idx){
         <div style="font-size:18px;font-weight:700;color:#fff">${window._fmtDateDMY(s.start_time)} — Endurance Race</div>
         <div id="endurance-subtitle" style="font-size:13px;color:#8a8a8a;margin-top:2px">${durH}h ${durM}min</div>
       </div>
-      <button class="btn" onclick="_renderEndurancePage()" style="padding:6px 16px">← Back</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="_exportEnduranceExcel(this)" style="padding:6px 16px">Export Excel</button>
+        <button class="btn" onclick="_renderEndurancePage()" style="padding:6px 16px">← Back</button>
+      </div>
     </div>`;
   document.getElementById('endurance-view-btns').style.display='flex';
   if(_enduranceCache[s.id]){
@@ -1730,6 +1734,260 @@ function _computePilotAvg(teamLaps,pilotName,teamNumber){
   const clean=normalTimes.filter(t=>t<threshold);
   const avg=clean.length?clean.reduce((a,b)=>a+b,0)/clean.length:rawAvg;
   return{avg,threshold};
+}
+
+async function _exportEnduranceExcel(btnEl){
+  if(!_enduranceData||typeof ExcelJS==='undefined')return;
+  if(btnEl){btnEl.disabled=true;btnEl.textContent='Exporting...';}
+  try{
+    const {teams,laps,events,pitLapsMap}=_enduranceData;
+    const s=_enduranceSessions[_enduranceIdx];
+    const cutoff=_replayT&&_replayT<s.end_time?_replayT:s.end_time;
+    const dateStr=window._fmtDateDMY(s.start_time);
+
+    // ── Palette ──
+    const C={bg:'0D0E15',bgAlt:'0B0C12',bgSection:'111318',yellow:'E8B830',
+      white:'FFFFFF',gray:'555566',green:'4ADE80',red:'EF4444',orange:'F97316',pitBg:'1A0808'};
+    const fill=c=>({type:'pattern',pattern:'solid',fgColor:{argb:'FF'+c}});
+    const font=(c,bold=false,sz=10)=>({bold,color:{argb:'FF'+c},name:'Calibri',size:sz});
+    const brd=()=>{const t={style:'thin',color:{argb:'FF1A1B22'}};return{top:t,bottom:t,left:t,right:t};};
+    const al=(h='center',v='middle')=>({horizontal:h,vertical:v});
+
+    // ── Helpers ──
+    const fmtSec=secs=>{
+      if(!secs||secs<=0)return'';
+      const m=Math.floor(secs/60);
+      const sc=(secs%60).toFixed(3).padStart(6,'0');
+      return m>0?(m+':'+sc):secs.toFixed(3)+'s';
+    };
+    // Clean avg with anomaly threshold (rawAvg * 1.1)
+    const cleanAvg=times=>{
+      const valid=times.filter(t=>t>=_minValidLap&&t<300);
+      if(!valid.length)return{avg:0,threshold:999};
+      const raw=valid.reduce((a,b)=>a+b,0)/valid.length;
+      const thr=raw*1.1;
+      const clean=valid.filter(t=>t<thr);
+      return{avg:clean.length?clean.reduce((a,b)=>a+b,0)/clean.length:raw,threshold:thr};
+    };
+
+    const cutLaps=laps.filter(l=>l.ts<=cutoff);
+    const wb=new ExcelJS.Workbook();
+    wb.creator='NFS Endurance';
+    wb.created=new Date();
+
+    // ── Sheet 1: Results ──
+    const ws1=wb.addWorksheet('Results');
+    ws1.properties.tabColor={argb:'FF'+C.yellow};
+    ws1.columns=[{width:7},{width:28},{width:6},{width:7},{width:16},{width:13},{width:13},{width:10},{width:42}];
+
+    // Title row
+    const durH=Math.floor((s.end_time-s.start_time)/3600000);
+    const durM=Math.round(((s.end_time-s.start_time)%3600000)/60000);
+    const titleRow=ws1.addRow([`NFS Endurance  ·  ${dateStr}  ·  ${durH}h ${durM}min`]);
+    ws1.mergeCells(titleRow.number,1,titleRow.number,9);
+    titleRow.height=30;
+    titleRow.getCell(1).fill=fill(C.bgSection);
+    titleRow.getCell(1).font=font(C.yellow,true,14);
+    titleRow.getCell(1).alignment=al('left');
+
+    ws1.addRow([]);
+
+    // Compute clean avg per team for coloring
+    const teamAvgMap={};
+    teams.forEach(t=>{
+      const ps=pitLapsMap&&pitLapsMap[t.number]||new Set();
+      const times=cutLaps.filter(l=>l.kart===parseInt(t.number)&&(ps.size>0?!ps.has(l.lap_number):_parseS2sec(l.s2)<=60)).map(l=>_enduranceLapTime(l));
+      teamAvgMap[t.number]=cleanAvg(times).avg;
+    });
+    const sortedAvgs=[...Object.values(teamAvgMap)].filter(v=>v>0).sort((a,b)=>a-b);
+    const paceColor=avg=>{
+      if(!avg||!sortedAvgs.length)return C.white;
+      const rank=sortedAvgs.indexOf(avg)/sortedAvgs.length;
+      return rank<0.33?C.green:rank<0.66?C.yellow:C.red;
+    };
+
+    // Header
+    const h1=ws1.addRow(['Місце','Команда','№','Кола','Відставання','Краще коло','Сер. темп','Піт-стопи','Пілоти']);
+    h1.height=22;
+    h1.eachCell(c=>{c.fill=fill(C.bgSection);c.font=font(C.yellow,true);c.border=brd();c.alignment=al();});
+    h1.getCell(2).alignment=al('left');h1.getCell(9).alignment=al('left');
+    ws1.views=[{state:'frozen',ySplit:h1.number}];
+
+    teams.forEach((t,i)=>{
+      const tLaps=cutLaps.filter(l=>l.kart===parseInt(t.number));
+      const lapCount=tLaps.length?Math.max(...tLaps.map(l=>l.lap_number)):0;
+      const avg=teamAvgMap[t.number];
+      const r=ws1.addRow([t.position,t.teamName,t.number,lapCount,t.lag||'',t.bestLap,avg?fmtSec(avg):'',t.pitstops,(t.pilots||[]).join(', ')]);
+      r.height=18;
+      const bg=i%2===0?C.bg:C.bgAlt;
+      r.eachCell(c=>{c.fill=fill(bg);c.font=font(C.white);c.border=brd();c.alignment=al('center');});
+      r.getCell(2).alignment=al('left');r.getCell(9).alignment=al('left');
+      // Position medal colors
+      const medalC=t.position===1?'FFD700':t.position===2?'C0C0C0':t.position===3?'CD7F32':C.white;
+      r.getCell(1).font=font(medalC,t.position<=3);
+    });
+
+    // ── Pilots table (right of Results) ──
+    {
+      const pilotAvgMap={};
+      teams.forEach(t=>{
+        const ps=pitLapsMap&&pitLapsMap[t.number]||new Set();
+        const tLaps=cutLaps.filter(l=>l.kart===parseInt(t.number));
+        (t.pilots||[]).forEach(p=>{
+          const times=tLaps.filter(l=>l.pilot===p&&(ps.size>0?!ps.has(l.lap_number):_parseS2sec(l.s2)<=60)).map(l=>_enduranceLapTime(l));
+          const {avg,threshold}=cleanAvg(times);
+          const cleanTimes=times.filter(tt=>tt>=_minValidLap&&tt<threshold);
+          const best=cleanTimes.length?Math.min(...cleanTimes):0;
+          if(avg>0)pilotAvgMap[p]={avg,best,team:t.teamName,laps:cleanTimes.length};
+        });
+      });
+      const sortedPilots=Object.entries(pilotAvgMap).sort((a,b)=>a[1].avg-b[1].avg);
+      const PC=11;// start col (after 9-col results table + 1 gap)
+      ws1.getColumn(PC).width=3;// gap
+      ws1.getColumn(PC+1).width=26;// pilot
+      ws1.getColumn(PC+2).width=22;// team
+      ws1.getColumn(PC+3).width=13;// avg
+      ws1.getColumn(PC+4).width=13;// best
+      ws1.getColumn(PC+5).width=7; // laps
+
+      // Title
+      const ptRow=ws1.getRow(1);
+      const ptc=ws1.getCell(1,PC+1);
+      ptc.value='Пілоти — Сер. темп';ptc.fill=fill(C.bgSection);ptc.font=font(C.yellow,true,14);ptc.alignment=al('left');
+      ws1.mergeCells(1,PC+1,1,PC+5);
+
+      // Header
+      const ph=ws1.getRow(3);
+      [{v:'Пілот',col:PC+1,al:'left'},{v:'Команда',col:PC+2,al:'left'},{v:'Сер. темп',col:PC+3},{v:'Краще',col:PC+4},{v:'Кола',col:PC+5}].forEach(({v,col,al:a})=>{
+        const c=ws1.getCell(3,col);c.value=v;c.fill=fill(C.bgSection);c.font=font(C.yellow,true);c.border=brd();c.alignment=al(a||'center');
+      });
+
+      sortedPilots.forEach(([name,d],i)=>{
+        const row=4+i;
+        const bg=i%2===0?C.bg:C.bgAlt;
+        [{v:name,col:PC+1,al:'left'},{v:d.team,col:PC+2,al:'left'},{v:fmtSec(d.avg),col:PC+3},{v:d.best?fmtSec(d.best):'',col:PC+4},{v:d.laps,col:PC+5}].forEach(({v,col,al:a})=>{
+          const cell=ws1.getCell(row,col);cell.value=v;cell.fill=fill(bg);cell.font=font(C.white);cell.border=brd();cell.alignment=al(a||'center');
+        });
+      });
+    }
+
+    // ── Team sheets ──
+    for(const team of teams){
+      const tNum=team.number;
+      const allTeamLaps=cutLaps.filter(l=>l.kart===parseInt(tNum)).sort((a,b)=>a.lap_number-b.lap_number);
+      if(!allTeamLaps.length)continue;
+
+      const ps=pitLapsMap&&pitLapsMap[tNum]||new Set();
+      const stints=_buildTeamStints(allTeamLaps,tNum,events);
+
+      // Team clean avg (with anomaly threshold)
+      const allCleanTimes=allTeamLaps.filter(l=>ps.size>0?!ps.has(l.lap_number):_parseS2sec(l.s2)<=60).map(l=>_enduranceLapTime(l));
+      const {avg:teamAvgSec,threshold:teamThr}=cleanAvg(allCleanTimes);
+
+      const sheetName=(`${tNum} ${team.teamName}`).slice(0,31);
+      const ws=wb.addWorksheet(sheetName);
+      ws.properties.tabColor={argb:'FF'+C.yellow};
+      // ── Dynamic columns: 5 per stint (Коло/Час/S1/S2/gap), min 7 for laps section ──
+      const BWIDTH=5;
+      const totalCols=Math.max(stints.length*BWIDTH,7);
+      ws.columns=Array.from({length:totalCols},(_,i)=>{
+        const p=i%BWIDTH;
+        if(p===0)return{width:6};
+        if(p===1)return{width:10};
+        if(p===2)return{width:8};
+        if(p===3)return{width:8};
+        return{width:2};
+      });
+      ws.getColumn(2).width=18;// wider for pilot names in laps section
+
+      // Title
+      const lapCount=allTeamLaps.length?Math.max(...allTeamLaps.map(l=>l.lap_number)):0;
+      const tRow=ws.addRow([`${team.teamName}`]);
+      ws.mergeCells(tRow.number,1,tRow.number,totalCols);
+      tRow.height=30;tRow.getCell(1).fill=fill(C.bgSection);tRow.getCell(1).font=font(C.yellow,true,14);tRow.getCell(1).alignment=al('left');
+
+      const infoRow=ws.addRow([`Команда #${tNum}   ·   Місце: ${team.position}   ·   Кола: ${lapCount}   ·   Піт-стопи: ${team.pitstops}   ·   Сер. темп: ${teamAvgSec?fmtSec(teamAvgSec):''}`]);
+      ws.mergeCells(infoRow.number,1,infoRow.number,totalCols);
+      infoRow.height=18;infoRow.getCell(1).fill=fill(C.bgSection);infoRow.getCell(1).font=font('9999BB',false,10);infoRow.getCell(1).alignment=al('left');
+
+      ws.addRow([]);
+
+      // ── Stints section header ──
+      const ssRow=ws.addRow(['СТІНТИ']);
+      ws.mergeCells(ssRow.number,1,ssRow.number,totalCols);
+      ssRow.height=16;ssRow.getCell(1).fill=fill(C.yellow);ssRow.getCell(1).font=font(C.bg,true);ssRow.getCell(1).alignment=al('left');
+
+      // ── Stints side-by-side ──
+      const stintR0=ws.lastRow.number+1;// first data row for stints
+      let maxStintRows=0;
+
+      stints.forEach((st,i)=>{
+        const c=i*BWIDTH+1;// 1-based start column
+        const stTimes=st.laps.filter(l=>!l.isPit).map(l=>l.time);
+        const {avg:stAvg,threshold:stThr}=cleanAvg(stTimes);
+        const stBest=stTimes.filter(t=>t>0&&t<stThr).reduce((a,b)=>Math.min(a,b),Infinity);
+        const pitSec=st.pitExactTime?parseTimeSec(st.pitExactTime):(st.pitS2||0);
+        const nClean=stTimes.filter(t=>t>0&&t<stThr).length;
+
+        // Row 0: pilot header with kart (merged 4 cols)
+        const hRow=ws.getRow(stintR0);hRow.height=22;
+        const hc=ws.getCell(stintR0,c);
+        hc.value=`${i+1}. ${st.pilot}${st.kart?'  #'+st.kart:''}`;
+        hc.fill=fill('252840');hc.font=font(C.yellow,true,11);hc.alignment=al('left');
+        ws.mergeCells(stintR0,c,stintR0,c+3);
+
+        // Row 1: stats [Кіл | Найкраще | Сер. | Час піта]
+        const sR=stintR0+1;ws.getRow(sR).height=16;
+        const statVals=[`Кіл: ${nClean}`,isFinite(stBest)&&stBest?fmtSec(stBest):'',stAvg?fmtSec(stAvg):'',st.pitExactTime||''];
+        statVals.forEach((v,k)=>{
+          const sc=ws.getCell(sR,c+k);
+          sc.value=v;sc.fill=fill(C.bgSection);sc.font=font('9999BB');sc.border=brd();sc.alignment=al();
+        });
+        // Avg vs team avg color
+        if(stAvg>0&&teamAvgSec>0){
+          const diff=(stAvg-teamAvgSec)/teamAvgSec;
+          ws.getCell(sR,c+2).font=font(diff<-0.02?C.green:diff>0.02?C.red:C.yellow,Math.abs(diff)>0.02);
+        }
+        // Pit time color
+        if(pitSec>0){
+          const pc=pitSec>=90&&pitSec<=91?C.green:pitSec<90?C.red:C.yellow;
+          ws.getCell(sR,c+3).font=font(pc,true);
+        }
+
+        // Row 2: column headers
+        const hR=stintR0+2;ws.getRow(hR).height=18;
+        ['Коло','Час','S1','S2'].forEach((h,k)=>{
+          const hc=ws.getCell(hR,c+k);
+          hc.value=h;hc.fill=fill('1E2030');hc.font=font(C.white,true);hc.border=brd();hc.alignment=al();
+        });
+
+        // Rows 3+: laps
+        st.laps.forEach((l,j)=>{
+          const row=stintR0+3+j;
+          ws.getRow(row).height=16;
+          const lapSec=l.time||0;
+          const isAnomaly=!l.isPit&&lapSec>0&&lapSec>=stThr;
+          const bg=l.isPit?C.pitBg:isAnomaly?'1A1000':(j%2===0?C.bg:C.bgAlt);
+          const fclr=l.isPit?C.red:isAnomaly?C.orange:C.white;
+          const vals=[l.lap_number,lapSec?fmtSec(lapSec):'',l.s1||'',l.s2||''];
+          vals.forEach((v,k)=>{
+            const cell=ws.getCell(row,c+k);
+            cell.value=v;cell.fill=fill(bg);cell.font=font(fclr);cell.border=brd();cell.alignment=al();
+          });
+        });
+
+        maxStintRows=Math.max(maxStintRows,st.laps.length);
+      });
+    }
+
+    const buf=await wb.xlsx.writeBuffer();
+    const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=`endurance_${dateStr.replace(/\./g,'-')}.xlsx`;a.click();
+    URL.revokeObjectURL(url);
+  }finally{
+    if(btnEl){btnEl.disabled=false;btnEl.textContent='Export Excel';}
+  }
 }
 
 function _openEnduranceTeamModal(teamNumber){
