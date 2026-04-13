@@ -906,12 +906,14 @@ function _renderEndurancePage(){
       const dur=s.end_time&&s.start_time?Math.round((s.end_time-s.start_time)/60000):0;
       const durH=Math.floor(dur/60);
       const durM=dur%60;
+      const cached=!!_enduranceCache[s.id];
+      const teamCount=_enduranceCache[s.id]?_enduranceCache[s.id].teams.length:null;
       html+=`<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:${j%2===0?'#0d0e15':'#0b0c12'};border-bottom:1px solid #111;border-radius:4px;margin-bottom:4px">
         <div>
           <div style="font-size:15px;font-weight:600;color:#fff">${window._fmtDateDMY(s.start_time)} — Endurance Race</div>
-          <div style="font-size:12px;color:#8a8a8a;margin-top:2px">${_enduranceCache[s.id]?_enduranceCache[s.id].teams.length+' teams · ':''}${durH}h ${durM}min</div>
+          <div style="font-size:12px;color:#8a8a8a;margin-top:2px">${teamCount?teamCount+' teams · ':''}${durH}h ${durM}min</div>
         </div>
-        <button class="btn" onclick="_loadEnduranceRace(${i})" style="padding:6px 16px">${_enduranceCache[s.id]?'Show':'Load'}</button>
+        <button class="btn" onclick="_loadEnduranceRace(${i})" style="padding:6px 16px">${cached?'Show':'Load'}</button>
       </div>`;
     });
     html+=`</div></div>`;
@@ -944,20 +946,8 @@ function _loadEnduranceRace(idx){
     _enduranceData=_enduranceCache[s.id];
     _renderEnduranceTeams();
   } else {
-    // Try localStorage cache
-    const lsKey='nfs_ed_v1_'+s.id;
-    let fromLs=null;
-    try{const raw=localStorage.getItem(lsKey);if(raw)fromLs=JSON.parse(raw);}catch(e){}
-    if(fromLs){
-      // Restore Sets from arrays
-      if(fromLs.pitLapsMap){Object.keys(fromLs.pitLapsMap).forEach(k=>{fromLs.pitLapsMap[k]=new Set(fromLs.pitLapsMap[k]);});}
-      _enduranceCache[s.id]=fromLs;
-      _enduranceData=fromLs;
-      _renderEnduranceTeams();
-    } else {
-      document.getElementById('endurance-table-wrap').innerHTML='<div style="color:#8a8a8a;text-align:center;padding:20px">Loading team data...</div>';
-      _loadEnduranceTeamData(s.id);
-    }
+    document.getElementById('endurance-table-wrap').innerHTML='<div style="color:#8a8a8a;text-align:center;padding:20px">Loading team data...</div>';
+    _loadEnduranceTeamData(s.id);
   }
 }
 
@@ -1089,13 +1079,6 @@ async function _loadEnduranceTeamData(sessionId){
 
     _enduranceData={teams,meta,laps:lapsResp,events:eventsResp,pitTimes:{},joins:[],sessionId,pitLapsMap,pitEntryTsMap};
     _enduranceCache[sessionId]=_enduranceData;
-    // Persist to localStorage (Sets → arrays for JSON serialization)
-    try{
-      const toStore={..._enduranceData};
-      toStore.pitLapsMap={};
-      Object.keys(pitLapsMap).forEach(k=>{toStore.pitLapsMap[k]=[...pitLapsMap[k]];});
-      localStorage.setItem('nfs_ed_v1_'+sessionId,JSON.stringify(toStore));
-    }catch(e){}
     _renderEnduranceTeams();
   }catch(e){
     console.error('Endurance team data error:',e);
