@@ -725,7 +725,7 @@ window._fmtDateDMY=_fmtDateDMY;
         </div>
       </div>
       <div id="endurance-table-wrap" class="ovx endurance-basic" style="padding:0 16px 16px"></div>
-      <div style="padding:0 16px 16px;display:flex;gap:6px">
+      <div id="endurance-view-btns" style="display:none;padding:0 16px 16px;gap:6px">
         <button class="btn active" id="e-view-basic" onclick="_setEnduranceView('basic')">Basic</button>
         <button class="btn" id="e-view-detailed" onclick="_setEnduranceView('detailed')">Detailed</button>
       </div>
@@ -788,19 +788,17 @@ let _enduranceIdx=0;
 
 function renderEndurance(){
   if(_enduranceSessions.length)return;// already loaded — don't reset
-  // Try localStorage before showing loading text
-  try{
-    const raw=localStorage.getItem('nfs_endurance_list_v2');
-    if(raw){
-      _enduranceSessions=JSON.parse(raw);
-      if(!_enduranceData){_enduranceIdx=0;_renderEndurancePage();}
-    }
-  }catch(e){}
-  if(!_enduranceSessions.length){
+  const LIST_KEY='nfs_endurance_list_v2';
+  let cachedSessions=[];
+  try{const raw=localStorage.getItem(LIST_KEY);if(raw)cachedSessions=JSON.parse(raw);}catch(e){}
+  if(cachedSessions.length){
+    _enduranceSessions=cachedSessions;
+    if(!_enduranceData){_enduranceIdx=0;_renderEndurancePage();}
+  }else{
     document.getElementById('endurance-header').innerHTML='<div style="color:#8a8a8a;padding:40px;text-align:center">Loading endurance races...</div>';
     document.getElementById('endurance-table-wrap').innerHTML='';
+    loadEnduranceSessions();
   }
-  loadEnduranceSessions();
 }
 
 async function loadEnduranceSessions(){
@@ -809,8 +807,6 @@ async function loadEnduranceSessions(){
   const UNTIL_KEY='nfs_endurance_until_v1';
   const now=Date.now();
   const today=new Date().toISOString().slice(0,10);
-
-  // Load cache immediately
   let cachedSessions=[];
   let checkedUntilMs=0;
   try{
@@ -819,16 +815,7 @@ async function loadEnduranceSessions(){
     const until=localStorage.getItem(UNTIL_KEY);
     if(until)checkedUntilMs=parseInt(until)||0;
   }catch(e){}
-  if(cachedSessions.length){
-    _enduranceSessions=cachedSessions;
-    if(!_enduranceData){_enduranceIdx=0;_renderEndurancePage();}
-  }
-
-  // Skip network fetch if checked recently (< 5 min ago)
-  if(checkedUntilMs&&(now-checkedUntilMs)<5*60*1000)return;
-
   try{
-    // fromDate = date of last check (to catch same-day new sessions)
     const fromDate=checkedUntilMs?new Date(checkedUntilMs).toISOString().slice(0,10):'2026-01-01';
     const countsResp=await fetch(COLLECTOR+'/db/session-counts?from='+fromDate+'&to='+today);
     const dateCounts=await countsResp.json();
@@ -842,7 +829,6 @@ async function loadEnduranceSessions(){
       ));
       results.forEach(arr=>{if(Array.isArray(arr))newSessions.push(...arr);});
     }
-    // Only probe sessions that ended after checkedUntil and not already in cache
     const cachedIds=new Set(cachedSessions.map(s=>s.id));
     const candidates=newSessions.filter(s=>{
       if(cachedIds.has(s.id)||!s.end_time||!s.start_time)return false;
@@ -864,6 +850,12 @@ async function loadEnduranceSessions(){
     if(!_enduranceSessions.length)
       document.getElementById('endurance-header').innerHTML='<div style="color:#ef4444;padding:40px;text-align:center">Failed to load endurance data</div>';
   }
+}
+
+async function _refreshEnduranceSessions(btn){
+  if(btn){btn.disabled=true;btn.textContent='Refreshing...';}
+  await loadEnduranceSessions();
+  if(btn){btn.disabled=false;btn.textContent='Refresh races';}
 }
 
 async function _probeEndurance(sessionId){
@@ -891,25 +883,45 @@ function _renderEndurancePage(){
     return;
   }
   // Show list of all marathons
-  let html='<div style="font-size:18px;font-weight:700;color:#fff;margin-bottom:16px">Endurance Races</div>';
+  let html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px"><div style="font-size:18px;font-weight:700;color:#fff">Endurance Races</div><button class="btn" id="endurance-refresh-btn" onclick="_refreshEnduranceSessions(this)" style="padding:6px 16px">Refresh races</button></div>';
+  _enduranceSessions.sort((a,b)=>b.start_time-a.start_time);
+  // Group by year
+  const byYear=[];
   _enduranceSessions.forEach((s,i)=>{
-    const dur=s.end_time&&s.start_time?Math.round((s.end_time-s.start_time)/60000):0;
-    const durH=Math.floor(dur/60);
-    const durM=dur%60;
-    const teams=s.team_count||s.kart_count||'—';
-    html+=`<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:${i%2===0?'#0d0e15':'#0b0c12'};border-bottom:1px solid #111;border-radius:4px;margin-bottom:4px">
-      <div>
-        <div style="font-size:15px;font-weight:600;color:#fff">${window._fmtDateDMY(s.start_time)} — Endurance Race</div>
-        <div style="font-size:12px;color:#8a8a8a;margin-top:2px">${_enduranceCache[s.id]?_enduranceCache[s.id].teams.length+' teams · ':''}${durH}h ${durM}min</div>
+    const year=s.start_time?new Date(s.start_time).getFullYear():0;
+    if(!byYear.length||byYear[byYear.length-1].year!==year)byYear.push({year,sessions:[]});
+    byYear[byYear.length-1].sessions.push({s,i});
+  });
+  const newestYear=byYear.length?byYear[0].year:null;
+  byYear.forEach(group=>{
+    const open=group.year===newestYear;
+    html+=`<div style="margin-bottom:4px">
+      <div onclick="(function(el){const b=el.nextElementSibling;const open=b.style.display!=='none';b.style.display=open?'none':'';el.querySelector('.yr-arrow').textContent=open?'▶':'▼';})(this)" style="display:flex;align-items:center;gap:8px;padding:8px 4px;cursor:pointer;user-select:none">
+        <span class="yr-arrow" style="color:#e8b830;font-size:10px">${open?'▼':'▶'}</span>
+        <span style="font-size:13px;font-weight:700;color:#e8b830;letter-spacing:0.08em">${group.year}</span>
+        <span style="font-size:11px;color:#555">${group.sessions.length} race${group.sessions.length!==1?'s':''}</span>
       </div>
-      <button class="btn" onclick="_loadEnduranceRace(${i})" style="padding:6px 16px">${_enduranceCache[s.id]?'Show':'Load'}</button>
-    </div>`;
+      <div style="display:${open?'':'none'}">`;
+    group.sessions.forEach(({s,i},j)=>{
+      const dur=s.end_time&&s.start_time?Math.round((s.end_time-s.start_time)/60000):0;
+      const durH=Math.floor(dur/60);
+      const durM=dur%60;
+      html+=`<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:${j%2===0?'#0d0e15':'#0b0c12'};border-bottom:1px solid #111;border-radius:4px;margin-bottom:4px">
+        <div>
+          <div style="font-size:15px;font-weight:600;color:#fff">${window._fmtDateDMY(s.start_time)} — Endurance Race</div>
+          <div style="font-size:12px;color:#8a8a8a;margin-top:2px">${_enduranceCache[s.id]?_enduranceCache[s.id].teams.length+' teams · ':''}${durH}h ${durM}min</div>
+        </div>
+        <button class="btn" onclick="_loadEnduranceRace(${i})" style="padding:6px 16px">${_enduranceCache[s.id]?'Show':'Load'}</button>
+      </div>`;
+    });
+    html+=`</div></div>`;
   });
   document.getElementById('endurance-header').innerHTML=html;
   document.getElementById('endurance-table-wrap').innerHTML='';
   document.getElementById('endurance-timeline').style.display='none';
   document.getElementById('endurance-tabs').style.display='none';
   document.getElementById('endurance-replay-wrap').style.display='';
+  document.getElementById('endurance-view-btns').style.display='none';
   document.getElementById('endurance-stats-wrap').style.display='none';
 }
 
@@ -927,6 +939,7 @@ function _loadEnduranceRace(idx){
       </div>
       <button class="btn" onclick="_renderEndurancePage()" style="padding:6px 16px">← Back</button>
     </div>`;
+  document.getElementById('endurance-view-btns').style.display='flex';
   if(_enduranceCache[s.id]){
     _enduranceData=_enduranceCache[s.id];
     _renderEnduranceTeams();
