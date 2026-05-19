@@ -884,6 +884,20 @@ async function _fbSaveCurrentRaceToRTDB(sessionId){
   await _fbDb.ref('endurance_sessions/'+sessionId).set(sessionMeta);
   _fbPublishedIds.add(sessionId);
 }
+async function _fbUnpublishRace(sessionId,btn){
+  if(!_isAdmin)return;
+  if(!confirm('Remove this race from Firebase?'))return;
+  if(btn){btn.disabled=true;btn.textContent='Removing...';}
+  try{
+    await _fbDb.ref('endurance_data/'+sessionId).remove();
+    await _fbDb.ref('endurance_sessions/'+sessionId).remove();
+    _fbPublishedIds.delete(sessionId);
+    _renderEndurancePage();
+  }catch(e){
+    console.error('FB unpublish error:',e);
+    if(btn){btn.disabled=false;btn.textContent='Error';}
+  }
+}
 async function _fbPublishRace(sessionId,btn){
   if(!_isAdmin)return;
   if(btn){btn.disabled=true;btn.textContent='Publishing...';}
@@ -1105,7 +1119,7 @@ function _renderEndurancePage(){
       const cached=!!_enduranceCache[s.id];
       const teamCount=_enduranceCache[s.id]?_enduranceCache[s.id].teams.length:null;
       const _published=_fbPublishedIds.has(s.id);
-      const _publishBtn=_isAdmin?`<button class="btn" onclick="_fbPublishRace('${s.id}',this)" style="padding:4px 10px;font-size:11px;margin-right:6px;${_published?'opacity:0.6':''}">${_published?'✓ Published':'Publish'}</button>`:'';
+      const _publishBtn=_isAdmin?(_published?`<button class="btn" onclick="_fbUnpublishRace('${s.id}',this)" style="padding:4px 10px;font-size:11px;margin-right:6px;opacity:0.6">✕ Unpublish</button>`:`<button class="btn" onclick="_fbPublishRace('${s.id}',this)" style="padding:4px 10px;font-size:11px;margin-right:6px">Publish</button>`):'';
       const _loadLabel=cached?'Show':'Load';
       html+=`<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:${j%2===0?'#0d0e15':'#0b0c12'};border-bottom:1px solid #111;border-radius:4px;margin-bottom:4px">
         <div>
