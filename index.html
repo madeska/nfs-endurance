@@ -997,7 +997,9 @@ function _renderEndurancePage(){
     return;
   }
   // Show list of all marathons
-  let html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px"><div style="font-size:18px;font-weight:700;color:#fff">Endurance Races</div><button class="btn" id="endurance-refresh-btn" onclick="_refreshEnduranceSessions(this)" style="padding:6px 16px">Refresh races</button></div>';
+  const _adminBadge=_isAdmin?`<span style="font-size:11px;color:#e8b830;font-weight:700;margin-right:4px">ADMIN</span><button class="btn" onclick="_adminLogout()" style="padding:4px 10px;font-size:11px;margin-right:6px">Logout</button>`:`<button class="btn" onclick="_showAdminModal()" style="padding:4px 10px;font-size:11px;margin-right:6px">Admin</button>`;
+  const _refreshBtn=_isAdmin?`<button class="btn" id="endurance-refresh-btn" onclick="_refreshEnduranceSessions(this)" style="padding:6px 16px">Refresh races</button>`:'';
+  let html=`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px"><div style="font-size:18px;font-weight:700;color:#fff">Endurance Races</div><div style="display:flex;align-items:center">${_adminBadge}${_refreshBtn}</div></div>`;
   _enduranceSessions.sort((a,b)=>b.start_time-a.start_time);
   // Group by year
   const byYear=[];
@@ -1022,12 +1024,15 @@ function _renderEndurancePage(){
       const durM=dur%60;
       const cached=!!_enduranceCache[s.id];
       const teamCount=_enduranceCache[s.id]?_enduranceCache[s.id].teams.length:null;
+      const _published=_fbPublishedIds.has(s.id);
+      const _publishBtn=_isAdmin?`<button class="btn" onclick="_fbPublishRace('${s.id}',this)" style="padding:4px 10px;font-size:11px;margin-right:6px;${_published?'opacity:0.6':''}">${_published?'✓ Published':'Publish'}</button>`:'';
+      const _loadLabel=cached?'Show':'Load';
       html+=`<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:${j%2===0?'#0d0e15':'#0b0c12'};border-bottom:1px solid #111;border-radius:4px;margin-bottom:4px">
         <div>
           <div style="font-size:15px;font-weight:600;color:#fff">${window._fmtDateDMY(s.start_time)} — Endurance Race</div>
-          <div style="font-size:12px;color:#8a8a8a;margin-top:2px">${teamCount?teamCount+' teams · ':''}${durH}h ${durM}min</div>
+          <div style="font-size:12px;color:#8a8a8a;margin-top:2px">${teamCount?teamCount+' teams · ':''}${durH}h ${durM}min${_published?' · <span style="color:#4ade80">published</span>':''}</div>
         </div>
-        <button class="btn" onclick="_loadEnduranceRace(${i})" style="padding:6px 16px">${cached?'Show':'Load'}</button>
+        <div style="display:flex;align-items:center">${_publishBtn}<button class="btn" onclick="_loadEnduranceRace(${i})" style="padding:6px 16px">${_loadLabel}</button></div>
       </div>`;
     });
     html+=`</div></div>`;
