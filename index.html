@@ -944,7 +944,7 @@ async function _fbLoadEnduranceSessions(){
     const snap=await _fbDb.ref('endurance_sessions').once('value');
     const val=snap.val();
     if(!val||!Object.keys(val).length){
-      document.getElementById('endurance-header').innerHTML='<div style="color:#8a8a8a;padding:40px;text-align:center">No endurance races found</div>';
+      _renderEndurancePage();
       return;
     }
     Object.keys(val).forEach(k=>_fbPublishedIds.add(k));
@@ -1069,7 +1069,9 @@ async function _probeEndurance(sessionId){
 
 function _renderEndurancePage(){
   if(!_enduranceSessions.length){
-    document.getElementById('endurance-header').innerHTML='<div style="color:#8a8a8a;padding:40px;text-align:center">No endurance races found</div>';
+    const _ab=_isAdmin?`<span style="font-size:11px;color:#e8b830;font-weight:700;margin-right:4px">ADMIN</span><button class="btn" onclick="_adminLogout()" style="padding:4px 10px;font-size:11px;margin-right:6px">Logout</button>`:`<button class="btn" onclick="_showAdminModal()" style="padding:4px 10px;font-size:11px;margin-right:6px">Admin</button>`;
+    const _rb=_isAdmin?`<button class="btn" id="endurance-refresh-btn" onclick="_refreshEnduranceSessions(this)" style="padding:6px 16px">Refresh races</button>`:'';
+    document.getElementById('endurance-header').innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px"><div style="font-size:18px;font-weight:700;color:#fff">Endurance Races</div><div style="display:flex;align-items:center">${_ab}${_rb}</div></div><div style="color:#8a8a8a;padding:40px;text-align:center">No endurance races found</div>`;
     document.getElementById('endurance-table-wrap').innerHTML='';
     document.getElementById('endurance-timeline').style.display='none';
     return;
