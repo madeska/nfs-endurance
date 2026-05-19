@@ -902,6 +902,37 @@ async function _fbPublishRace(sessionId,btn){
     if(btn){btn.disabled=false;btn.textContent='Error — retry';}
   }
 }
+async function _fbLoadRaceData(sessionId){
+  document.getElementById('endurance-table-wrap').innerHTML='<div style="color:#8a8a8a;text-align:center;padding:20px">Loading team data...</div>';
+  try{
+    const snap=await _fbDb.ref('endurance_data/'+sessionId).once('value');
+    const data=snap.val();
+    if(!data)throw new Error('No data in RTDB for '+sessionId);
+    const pitLapsMap={};
+    for(const [k,v] of Object.entries(data.pitLapsMap||{})){
+      const arr=Array.isArray(v)?v:Object.values(v);
+      pitLapsMap[k]=new Set(arr);
+    }
+    const laps=Array.isArray(data.laps)?data.laps:Object.values(data.laps||{});
+    const joins=Array.isArray(data.joins)?data.joins:Object.values(data.joins||{});
+    _enduranceData={
+      sessionId:data.sessionId,
+      teams:data.teams||[],
+      meta:data.meta||{},
+      laps,
+      events:[],
+      pitLapsMap,
+      pitEntryTsMap:data.pitEntryTsMap||{},
+      pitTimes:data.pitTimes||{},
+      joins
+    };
+    _enduranceCache[sessionId]=_enduranceData;
+    _renderEnduranceTeams();
+  }catch(e){
+    console.error('FB load race data:',e);
+    document.getElementById('endurance-table-wrap').innerHTML='<div style="color:#ef4444;text-align:center;padding:20px">Failed to load race data</div>';
+  }
+}
 /* ─── ENDURANCE ─── */
 let _enduranceSessions=[];
 let _enduranceIdx=0;
@@ -1115,8 +1146,12 @@ function _loadEnduranceRace(idx){
     _enduranceData=_enduranceCache[s.id];
     _renderEnduranceTeams();
   } else {
-    document.getElementById('endurance-table-wrap').innerHTML='<div style="color:#8a8a8a;text-align:center;padding:20px">Loading team data...</div>';
-    _loadEnduranceTeamData(s.id);
+    if(!_isAdmin){
+      _fbLoadRaceData(s.id);
+    }else{
+      document.getElementById('endurance-table-wrap').innerHTML='<div style="color:#8a8a8a;text-align:center;padding:20px">Loading team data...</div>';
+      _loadEnduranceTeamData(s.id);
+    }
   }
 }
 
