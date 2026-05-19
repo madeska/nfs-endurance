@@ -8,6 +8,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Roboto+Mono:wght@400;500;700&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#08090d;min-height:100vh;padding:0}
@@ -691,6 +694,7 @@ setTimeout(async()=>{
 },100);
 window._COLLECTOR=COLLECTOR;
 window._fmtDateDMY=_fmtDateDMY;
+_fbInit();
 </script>
 </head>
 <body>
@@ -757,6 +761,25 @@ window._fmtDateDMY=_fmtDateDMY;
 </div>
 
 <script>
+const _FB_CONFIG={apiKey:'AIzaSyA_C7wlAqqEKwKvXjm4aSrxj28-7YRmTcg',authDomain:'nfs-endurance.firebaseapp.com',databaseURL:'https://nfs-endurance-default-rtdb.europe-west1.firebasedatabase.app',projectId:'nfs-endurance',storageBucket:'nfs-endurance.firebasestorage.app',messagingSenderId:'579851470135',appId:'1:579851470135:web:ce6d0cbd076ca581c286b2'};
+let _fbApp=null,_fbAuth=null,_fbDb=null;
+let _isAdmin=false;
+let _fbPublishedIds=new Set();
+let _pendingPublish=null;
+function _fbInit(){
+  _fbApp=firebase.initializeApp(_FB_CONFIG);
+  _fbAuth=firebase.auth();
+  _fbDb=firebase.database();
+  _fbAuth.onAuthStateChanged(user=>{
+    _isAdmin=!!user;
+    const ap=document.querySelector('.page.active');
+    if(ap&&ap.id==='page-endurance'){
+      _enduranceSessions=[];
+      _enduranceData=null;
+      renderEndurance();
+    }
+  });
+}
 /* ─── CONSTANTS ─── */
 const _role=1;
 const _currentUrl='https://ekarting.duckdns.org/timing';
@@ -809,15 +832,20 @@ async function loadEnduranceSessions(){
   const COLLECTOR=window._COLLECTOR;
   const LIST_KEY='nfs_endurance_list_v2';
   const UNTIL_KEY='nfs_endurance_until_v1';
+  const NOT_ENDURANCE_KEY='nfs_not_endurance_v1';
+  const NOT_ENDURANCE_MAX=1000;
   const now=Date.now();
   const today=new Date().toISOString().slice(0,10);
   let cachedSessions=[];
   let checkedUntilMs=0;
+  let notEnduranceIds=new Set();
   try{
     const raw=localStorage.getItem(LIST_KEY);
     if(raw)cachedSessions=JSON.parse(raw);
     const until=localStorage.getItem(UNTIL_KEY);
     if(until)checkedUntilMs=parseInt(until)||0;
+    const notRaw=localStorage.getItem(NOT_ENDURANCE_KEY);
+    if(notRaw)notEnduranceIds=new Set(JSON.parse(notRaw));
   }catch(e){}
   try{
     const fromDate=checkedUntilMs?new Date(checkedUntilMs).toISOString().slice(0,10):'2026-01-01';
@@ -835,13 +863,23 @@ async function loadEnduranceSessions(){
     }
     const cachedIds=new Set(cachedSessions.map(s=>s.id));
     const candidates=newSessions.filter(s=>{
-      if(cachedIds.has(s.id)||!s.end_time||!s.start_time)return false;
+      if(cachedIds.has(s.id)||notEnduranceIds.has(s.id)||!s.end_time||!s.start_time)return false;
       if(s.end_time<=checkedUntilMs)return false;
       return(s.end_time-s.start_time)>60*60*1000;
     });
     const probeResults=await Promise.all(candidates.map(s=>_probeEndurance(s.id)));
     const newEndurance=[];
-    candidates.forEach((s,i)=>{if(probeResults[i]){s._teamCount=probeResults[i];newEndurance.push(s);}});
+    const newNotEndurance=[];
+    candidates.forEach((s,i)=>{
+      if(probeResults[i]){s._teamCount=probeResults[i];newEndurance.push(s);}
+      else if(probeResults[i]===false)newNotEndurance.push(s.id);
+    });
+    if(newNotEndurance.length){
+      newNotEndurance.forEach(id=>notEnduranceIds.add(id));
+      let arr=[...notEnduranceIds];
+      if(arr.length>NOT_ENDURANCE_MAX)arr=arr.slice(arr.length-NOT_ENDURANCE_MAX);
+      try{localStorage.setItem(NOT_ENDURANCE_KEY,JSON.stringify(arr));}catch(e){}
+    }
     const merged=[...cachedSessions,...newEndurance].sort((a,b)=>b.start_time-a.start_time);
     _enduranceSessions=merged;
     try{
@@ -876,7 +914,7 @@ async function _probeEndurance(sessionId){
       if(teamNums.size>=3)return true;
     }
     return false;
-  }catch(e){return false;}
+  }catch(e){return null;}
 }
 
 function _renderEndurancePage(){
