@@ -855,6 +855,53 @@ async function _fbLoadPublishedIds(){
     if(val)Object.keys(val).forEach(k=>_fbPublishedIds.add(k));
   }catch(e){}
 }
+async function _fbSaveCurrentRaceToRTDB(sessionId){
+  const data=_enduranceCache[sessionId];
+  if(!data)return;
+  const pitLapsMapSer={};
+  for(const [k,v] of Object.entries(data.pitLapsMap||{})){
+    pitLapsMapSer[k]=v instanceof Set?[...v]:Array.isArray(v)?v:Object.values(v);
+  }
+  const payload={
+    sessionId:data.sessionId,
+    teams:data.teams,
+    meta:data.meta||{},
+    laps:data.laps,
+    pitLapsMap:pitLapsMapSer,
+    pitEntryTsMap:data.pitEntryTsMap||{},
+    pitTimes:data.pitTimes||{},
+    joins:data.joins||[]
+  };
+  const s=_enduranceSessions.find(x=>x.id===sessionId);
+  const sessionMeta={
+    id:sessionId,
+    start_time:s?s.start_time:0,
+    end_time:s?s.end_time:0,
+    teamCount:data.teams?data.teams.length:0,
+    publishedAt:Date.now()
+  };
+  await _fbDb.ref('endurance_data/'+sessionId).set(payload);
+  await _fbDb.ref('endurance_sessions/'+sessionId).set(sessionMeta);
+  _fbPublishedIds.add(sessionId);
+}
+async function _fbPublishRace(sessionId,btn){
+  if(!_isAdmin)return;
+  if(btn){btn.disabled=true;btn.textContent='Publishing...';}
+  try{
+    if(_enduranceCache[sessionId]){
+      await _fbSaveCurrentRaceToRTDB(sessionId);
+      if(btn){btn.textContent='✓ Published';btn.style.opacity='0.6';}
+    }else{
+      _pendingPublish=sessionId;
+      const idx=_enduranceSessions.findIndex(s=>s.id===sessionId);
+      if(idx>=0)_loadEnduranceRace(idx);
+      else{if(btn){btn.disabled=false;btn.textContent='Publish';}}
+    }
+  }catch(e){
+    console.error('FB publish error:',e);
+    if(btn){btn.disabled=false;btn.textContent='Error — retry';}
+  }
+}
 /* ─── ENDURANCE ─── */
 let _enduranceSessions=[];
 let _enduranceIdx=0;
@@ -1202,6 +1249,13 @@ async function _loadEnduranceTeamData(sessionId){
     _enduranceData={teams,meta,laps:lapsResp,events:eventsResp,pitTimes:{},joins:[],sessionId,pitLapsMap,pitEntryTsMap};
     _enduranceCache[sessionId]=_enduranceData;
     _renderEnduranceTeams();
+    if(_pendingPublish===sessionId){
+      _pendingPublish=null;
+      _fbSaveCurrentRaceToRTDB(sessionId).then(()=>{
+        const sub=document.getElementById('endurance-subtitle');
+        if(sub)sub.textContent+=' · Published to Firebase ✓';
+      }).catch(e=>console.error('FB publish after load:',e));
+    }
   }catch(e){
     console.error('Endurance team data error:',e);
     document.getElementById('endurance-table-wrap').innerHTML='<div style="color:#ef4444;text-align:center;padding:20px">Failed to load team data</div>';
