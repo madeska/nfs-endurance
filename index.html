@@ -697,6 +697,18 @@ window._fmtDateDMY=_fmtDateDMY;
 </script>
 </head>
 <body>
+<div id="fb-admin-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:#1a1b26;padding:32px;border-radius:8px;width:320px;max-width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.5)">
+    <div style="font-size:18px;font-weight:700;color:#fff;margin-bottom:20px">Admin Login</div>
+    <input id="fb-admin-email" type="email" placeholder="Email" style="width:100%;padding:10px;background:#0d0e15;border:1px solid #333;color:#fff;border-radius:4px;margin-bottom:12px;box-sizing:border-box">
+    <input id="fb-admin-pass" type="password" placeholder="Password" onkeydown="if(event.key==='Enter')_adminLogin()" style="width:100%;padding:10px;background:#0d0e15;border:1px solid #333;color:#fff;border-radius:4px;margin-bottom:16px;box-sizing:border-box">
+    <div id="fb-admin-err" style="color:#ef4444;font-size:13px;margin-bottom:12px;display:none"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn" onclick="_hideAdminModal()" style="padding:8px 16px">Cancel</button>
+      <button class="btn" onclick="_adminLogin()" style="padding:8px 16px;background:#e8b830;color:#000;font-weight:700">Login</button>
+    </div>
+  </div>
+</div>
 <div class="wrap" style="position:relative">
 
   <div class="header">
@@ -808,6 +820,40 @@ function _bestFromLaps(r){
   if(!r.lapTimes||!r.lapTimes.length)return _isValidTime(r.best)?parseTimeSec(r.best):NaN;
   const valid=r.lapTimes.map(l=>parseTimeSec(l.lap)).filter(n=>_validSec(n));
   return valid.length?Math.min(...valid):NaN;
+}
+function _showAdminModal(){
+  const m=document.getElementById('fb-admin-modal');
+  m.style.display='flex';
+  document.getElementById('fb-admin-err').style.display='none';
+  document.getElementById('fb-admin-email').value='';
+  document.getElementById('fb-admin-pass').value='';
+  setTimeout(()=>document.getElementById('fb-admin-email').focus(),50);
+}
+function _hideAdminModal(){
+  document.getElementById('fb-admin-modal').style.display='none';
+}
+async function _adminLogin(){
+  const email=document.getElementById('fb-admin-email').value.trim();
+  const pass=document.getElementById('fb-admin-pass').value;
+  const errEl=document.getElementById('fb-admin-err');
+  if(!email||!pass){errEl.textContent='Enter email and password';errEl.style.display='';return;}
+  try{
+    await _fbAuth.signInWithEmailAndPassword(email,pass);
+    _hideAdminModal();
+  }catch(e){
+    errEl.textContent=e.message||'Login failed';
+    errEl.style.display='';
+  }
+}
+function _adminLogout(){
+  _fbAuth.signOut();
+}
+async function _fbLoadPublishedIds(){
+  try{
+    const snap=await _fbDb.ref('endurance_sessions').once('value');
+    const val=snap.val();
+    if(val)Object.keys(val).forEach(k=>_fbPublishedIds.add(k));
+  }catch(e){}
 }
 /* ─── ENDURANCE ─── */
 let _enduranceSessions=[];
