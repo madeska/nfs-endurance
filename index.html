@@ -859,6 +859,25 @@ async function _fbLoadPublishedIds(){
 let _enduranceSessions=[];
 let _enduranceIdx=0;
 
+async function _fbLoadEnduranceSessions(){
+  document.getElementById('endurance-header').innerHTML='<div style="color:#8a8a8a;padding:40px;text-align:center">Loading endurance races...</div>';
+  document.getElementById('endurance-table-wrap').innerHTML='';
+  try{
+    const snap=await _fbDb.ref('endurance_sessions').once('value');
+    const val=snap.val();
+    if(!val||!Object.keys(val).length){
+      document.getElementById('endurance-header').innerHTML='<div style="color:#8a8a8a;padding:40px;text-align:center">No endurance races found</div>';
+      return;
+    }
+    Object.keys(val).forEach(k=>_fbPublishedIds.add(k));
+    _enduranceSessions=Object.values(val).sort((a,b)=>b.start_time-a.start_time);
+    _renderEndurancePage();
+  }catch(e){
+    console.error('FB load sessions:',e);
+    document.getElementById('endurance-header').innerHTML='<div style="color:#ef4444;padding:40px;text-align:center">Failed to load races</div>';
+  }
+}
+
 function renderEndurance(){
   if(_enduranceSessions.length)return;// already loaded — don't reset
   const LIST_KEY='nfs_endurance_list_v2';
