@@ -879,13 +879,20 @@ async function _fbLoadEnduranceSessions(){
 }
 
 function renderEndurance(){
-  if(_enduranceSessions.length)return;// already loaded — don't reset
+  if(_enduranceSessions.length){_renderEndurancePage();return;}
+  if(!_isAdmin){
+    _fbLoadEnduranceSessions();
+    return;
+  }
+  // Admin: use localStorage cache + collector
+  _fbLoadPublishedIds();// populate _fbPublishedIds for publish button state
   const LIST_KEY='nfs_endurance_list_v2';
   let cachedSessions=[];
   try{const raw=localStorage.getItem(LIST_KEY);if(raw)cachedSessions=JSON.parse(raw);}catch(e){}
   if(cachedSessions.length){
     _enduranceSessions=cachedSessions;
-    if(!_enduranceData){_enduranceIdx=0;_renderEndurancePage();}
+    _enduranceIdx=0;
+    _renderEndurancePage();
   }else{
     document.getElementById('endurance-header').innerHTML='<div style="color:#8a8a8a;padding:40px;text-align:center">Loading endurance races...</div>';
     document.getElementById('endurance-table-wrap').innerHTML='';
