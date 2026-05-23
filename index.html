@@ -931,10 +931,16 @@ async function _fbLoadRaceData(sessionId){
       pitLapsMap[k]=new Set(arr);
     }
     const laps=Array.isArray(data.laps)?data.laps:Object.values(data.laps||{});
+    const teams=Array.isArray(data.teams)?data.teams:Object.values(data.teams||{});
     const joins=Array.isArray(data.joins)?data.joins:Object.values(data.joins||{});
+    const toArr=v=>Array.isArray(v)?v:(v&&typeof v==='object'?Object.values(v):[]);
+    const stintMeta={};
+    for(const [k,v] of Object.entries(data.stintMeta||{})){
+      stintMeta[k]={pitEntryKarts:toArr(v.pitEntryKarts),pitTimesMs:toArr(v.pitTimesMs),lastNonPitKart:v.lastNonPitKart||''};
+    }
     _enduranceData={
       sessionId:data.sessionId,
-      teams:data.teams||[],
+      teams,
       meta:data.meta||{},
       laps,
       events:[],
@@ -942,7 +948,7 @@ async function _fbLoadRaceData(sessionId){
       pitEntryTsMap:data.pitEntryTsMap||{},
       pitTimes:data.pitTimes||{},
       joins,
-      stintMeta:data.stintMeta||{}
+      stintMeta
     };
     _enduranceCache[sessionId]=_enduranceData;
     _renderEnduranceTeams();
