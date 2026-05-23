@@ -862,6 +862,8 @@ async function _fbSaveCurrentRaceToRTDB(sessionId){
   for(const [k,v] of Object.entries(data.pitLapsMap||{})){
     pitLapsMapSer[k]=v instanceof Set?[...v]:Array.isArray(v)?v:Object.values(v);
   }
+  const stintMeta={};
+  (data.teams||[]).forEach(team=>{stintMeta[team.number]=_extractPitMeta(team.number,data.events||[]);});
   const payload={
     sessionId:data.sessionId,
     teams:data.teams,
@@ -870,7 +872,8 @@ async function _fbSaveCurrentRaceToRTDB(sessionId){
     pitLapsMap:pitLapsMapSer,
     pitEntryTsMap:data.pitEntryTsMap||{},
     pitTimes:data.pitTimes||{},
-    joins:data.joins||[]
+    joins:data.joins||[],
+    stintMeta
   };
   const s=_enduranceSessions.find(x=>x.id===sessionId);
   const sessionMeta={
@@ -938,7 +941,8 @@ async function _fbLoadRaceData(sessionId){
       pitLapsMap,
       pitEntryTsMap:data.pitEntryTsMap||{},
       pitTimes:data.pitTimes||{},
-      joins
+      joins,
+      stintMeta:data.stintMeta||{}
     };
     _enduranceCache[sessionId]=_enduranceData;
     _renderEnduranceTeams();
@@ -1788,6 +1792,27 @@ function _parseS2sec(s2){
   if(s2.includes(':')){const p=s2.split(':');return parseFloat(p[0])*60+parseFloat(p[1]);}
   return parseFloat(s2)||0;
 }
+function _extractPitMeta(teamNumber,events){
+  const pitEntryKarts=[];const pitTimesMs=[];let lastNonPitKart='';
+  let wasOnPit=false,pitExitTs=null,latestPitMainTime=null;
+  (events||[]).forEach(e=>{
+    if(!e.data||!e.data.team||e.data.team.number!==teamNumber)return;
+    const t=e.data.team;const onPit=t.isOnPit===true||t.isOnPit==='true';
+    if(!onPit){
+      if(t.kart&&t.kart!=='0')lastNonPitKart=t.kart;
+      if(wasOnPit){pitExitTs=e.ts;latestPitMainTime=null;}
+      if(pitExitTs!==null&&t.lastPitMainTime&&t.lastPitMainTime!=='0')latestPitMainTime=t.lastPitMainTime;
+    }
+    if(onPit&&!wasOnPit){
+      pitEntryKarts.push({ts:e.ts,kart:lastNonPitKart});
+      if(pitExitTs!==null&&latestPitMainTime){const durSec=parseTimeSec(latestPitMainTime);if(!isNaN(durSec)&&durSec>0)pitTimesMs.push({ts:pitExitTs,durationSec:durSec});}
+      pitExitTs=null;latestPitMainTime=null;
+    }
+    wasOnPit=onPit;
+  });
+  if(pitExitTs!==null&&latestPitMainTime){const durSec=parseTimeSec(latestPitMainTime);if(!isNaN(durSec)&&durSec>0)pitTimesMs.push({ts:pitExitTs,durationSec:durSec});}
+  return{pitEntryKarts,pitTimesMs,lastNonPitKart};
+}
 
 function _enduranceLapTime(l){
   const s1=parseFloat(l.s1)||0;
@@ -1805,10 +1830,15 @@ function _buildTeamStints(teamLaps,teamNumber,events){
   // Build pit entry karts + pit durations from isOnPit transitions
   // For each false→true transition: take kart from last event where isOnPit=false
   // For each true→false transition: take lastPitMainTime as pit duration
-  const pitEntryKarts=[];// [{ts, kart}] — one per pit entry
-  const pitTimesMs=[];// [{ts, durationSec}] — one per pit exit
+  let pitEntryKarts=[];
+  let pitTimesMs=[];
   let _lastNonPitKart='';
-  if(events){
+  const _sm=(!events||!events.length)&&_enduranceData&&_enduranceData.stintMeta?_enduranceData.stintMeta[teamNumber]:null;
+  if(_sm){
+    pitEntryKarts=[...(_sm.pitEntryKarts||[])];
+    pitTimesMs=[...(_sm.pitTimesMs||[])];
+    _lastNonPitKart=_sm.lastNonPitKart||'';
+  }else if(events&&events.length){
     let wasOnPit=false;
     let pitExitTs=null;// ts of pit exit (true→false transition)
     let latestPitMainTime=null;// latest lastPitMainTime during current stint
@@ -1936,6 +1966,25 @@ function _buildTeamStints(teamLaps,teamNumber,events){
       next.startTs=s.startTs;
     }else{
       merged2.push(s);
+    }
+  }
+  // Fallback: estimate pit times from pitEntryTsMap when events/stintMeta unavailable
+  if(!pitTimesMs.length&&_enduranceData&&_enduranceData.pitEntryTsMap){
+    for(let i=0;i<merged2.length;i++){
+      const s=merged2[i];
+      if(s.pitLap&&!s.pitExactTime){
+        const entryTs=(_enduranceData.pitEntryTsMap[teamNumber]||{})[s.pitLap];
+        const nextS=merged2[i+1];
+        if(entryTs&&nextS&&nextS.startTs&&nextS.startTs>entryTs){
+          const firstNormal=nextS.laps.find(l=>!l.isPit);
+          const s1adj=firstNormal?parseFloat(firstNormal.s1)||0:0;
+          const durSec=(nextS.startTs-entryTs)/1000-s1adj;
+          if(durSec>20&&durSec<600){
+            const m=Math.floor(durSec/60);const ss=(durSec%60).toFixed(3).padStart(6,'0');
+            s.pitExactTime=m>0?(m+':'+ss):durSec.toFixed(3)+'s';
+          }
+        }
+      }
     }
   }
   return merged2;
