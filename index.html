@@ -1410,6 +1410,14 @@ function _buildReplayState(T){
       _wasOnPit=onPit;
       evtOnPit=onPit;
     }
+    // Fallback: derive physKart from stintMeta when events unavailable
+    if(!physKart&&_enduranceData.stintMeta){
+      const sm=_enduranceData.stintMeta[String(kn)];
+      if(sm&&sm.pitEntryKarts&&sm.pitEntryKarts.length){
+        const pitsBefore=k.laps.filter(l=>pitSet.has(l.lap_number)&&l.ts<=T).length;
+        physKart=pitsBefore<sm.pitEntryKarts.length?sm.pitEntryKarts[pitsBefore].kart:(sm.lastNonPitKart||'');
+      }
+    }
     const lapsLapCount=k.laps.length?Math.max(...k.laps.map(l=>l.lap_number||0)):0;
     const teamInfo=_enduranceData.teams.find(t=>t.number===String(kn));
     rows.push({
@@ -2428,6 +2436,12 @@ function _renderEnduranceStints(){
       // Last stint (no pit after): use last event's totalOnTrack + ts delta
       const lastStintTime=stintTimes['last'];
       if(lastStintTime!==undefined)stintTime=_fmtDuration(lastStintTime);
+    }
+    // Fallback: compute from lap timestamps when events unavailable
+    if(stintTime==='—'&&s.endTs){
+      const prevEndTs=i>0?stints[i-1].endTs:null;
+      const durSec=prevEndTs?((s.endTs-prevEndTs)/1000):((s.endTs-s.startTs)/1000);
+      if(durSec>0)stintTime=_fmtDuration(durSec);
     }
 
     const bestColor=best&&Math.abs(best-raceBest)<0.005?'color:#a78bfa':'color:#4ade80';
