@@ -1535,11 +1535,30 @@ function _computeKartAnalysis(){
   const{laps,events,pitLapsMap,teams}=_enduranceData;
   // Build physKart map from events: for each (teamNum, lapNumber) → physKart
   const physKartByTeamLap={};
-  events.forEach(e=>{
-    const t=e.data&&e.data.team;
-    if(!t||!t.number||!t.kart||t.kart==='0')return;
-    physKartByTeamLap[t.number+'_'+t.lapCount]=t.kart;
-  });
+  if(events&&events.length){
+    events.forEach(e=>{
+      const t=e.data&&e.data.team;
+      if(!t||!t.number||!t.kart||t.kart==='0')return;
+      physKartByTeamLap[t.number+'_'+t.lapCount]=t.kart;
+    });
+  }else if(_enduranceData.stintMeta){
+    // Fallback: derive physKart per lap from stintMeta when events unavailable
+    const lapsByTeam={};
+    laps.forEach(l=>{const tn=String(l.kart);if(!lapsByTeam[tn])lapsByTeam[tn]=[];lapsByTeam[tn].push(l);});
+    Object.entries(lapsByTeam).forEach(([tn,tLaps])=>{
+      const sm=_enduranceData.stintMeta[tn];
+      if(!sm||!sm.pitEntryKarts||!sm.pitEntryKarts.length)return;
+      const ps=pitLapsMap&&pitLapsMap[tn]||new Set();
+      const sorted=[...tLaps].sort((a,b)=>a.lap_number-b.lap_number);
+      let si=0;
+      sorted.forEach(l=>{
+        const isPit=ps.size>0?ps.has(l.lap_number):_parseS2sec(l.s2)>60;
+        const kart=si<sm.pitEntryKarts.length?sm.pitEntryKarts[si].kart:(sm.lastNonPitKart||'');
+        if(kart)physKartByTeamLap[tn+'_'+l.lap_number]=kart;
+        if(isPit)si++;
+      });
+    });
+  }
   // Build combos: {pilot|physKart → {pilot, physKart, teamNum, teamName, times[]}}
   const combos={};
   const teamByNum={};
