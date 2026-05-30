@@ -1263,7 +1263,7 @@ async function _loadEnduranceTeamData(sessionId){
     });
 
     // Sort teams by lap count desc (position proxy when events unavailable)
-    const kartNums=Object.keys(byKart).map(Number).filter(n=>byKart[n].pilots.size>=2);
+    const kartNums=Object.keys(byKart).map(Number).filter(n=>byKart[n].pilots.size>=1);
     const teams=kartNums.map((kn,i)=>{
       const k=byKart[kn];
       const maxLap=Math.max(...k.laps.map(l=>l.lap_number));
