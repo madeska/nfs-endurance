@@ -1318,8 +1318,8 @@ async function _loadEnduranceTeamData(sessionId){
       }).catch(e=>console.error('FB publish after load:',e));
     }
   }catch(e){
-    console.error('Endurance team data error:',e);
-    document.getElementById('endurance-table-wrap').innerHTML='<div style="color:#ef4444;text-align:center;padding:20px">Failed to load team data</div>';
+    console.warn('Collector unavailable, falling back to Firebase:',e);
+    _fbLoadRaceData(sessionId);
   }
 }
 
